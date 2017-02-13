@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# PROVIDE: digitaloceanpre
+# REQUIRE: FILESYSTEMS
+# BEFORE: hostid cloudinit digitalocean
+
+. /etc/rc.subr
+
+name="digitaloceanpre"
+start_cmd="${name}_start"
+stop_cmd=":"
+
+digitaloceanpre_start()
+{
+        # Reset the hostid to be what is expected
+        hostid=$(kenv -q smbios.system.uuid)
+        if [ -e /etc/hostid ]; then
+            echo "DigitalOcean: current hostID $(cat /etc/hostid)"
+        fi
+        echo "DigitalOcean: expected hostID ${hostid}"
+        printf ${hostid} > /etc/hostid
+
+        # Resize the disk
+        echo "DigitalOcean: resizing the disk..."
+        /sbin/gpart recover vtbd0
+        /sbin/gpart resize -i 3 vtbd0
+
+        if [ -e /dev/gpt/disk0 ]; then
+            echo "DigitalOcean: expanding the ZFS pool"
+            /sbin/zpool online -e zroot gpt/disk0
+        fi
+
+        # Mount up the ConfigDrive
+        echo "DigitalOcean: mount configdrive"
+        mkdir -p /var/lib/cloud/seed/config_drive
+        ln -sf /var/lib/cloud/seed /var/lib/cloud/seeds
+        mount_cd9660  -o ro -v /dev/vtbd1 /var/lib/cloud/seed/config_drive || echo "DigitalOcean: did not mount config drive"
+
+        # Force our supported config
+        cp /usr/local/etc/cloud/cloud.cfg.d/99-digitalocean.cfg /usr/local/etc/cloud/cloud.cfg
+
+}
+
+run_rc_command "$1"

@@ -1,0 +1,102 @@
+#!/bin/sh
+
+# PROVIDE: digitalocean
+# REQUIRE: FILESYSTEMS cloudinit digitaloceanpre
+
+. /etc/rc.subr
+
+name="digitalocean"
+start_cmd="${name}_start"
+stop_cmd=":"
+
+digitalocean_start()
+{
+        check_startmsgs && echo "DigitalOcean: applying droplet configuration"
+
+        jq="/usr/local/bin/jq"
+
+        echo "DigitalOcean: reading meta-data"
+        meta="/var/lib/cloud/seed/config_drive/digitalocean_meta_data.json"
+
+        echo "DigitalOcean: applying hostname"
+        my_hostname=$(${jq} -r -M '.hostname' ${meta})
+
+        new_rc=$(sed -e '/# DigitalOcean/,/^/d' -e '/hostname/d' /etc/rc.conf)
+        cat > /etc/rc.conf <<EOM
+${new_rc}
+
+hostname="${my_hostname}"
+
+# DigitalOcean Dynamic Configuration lines and the immediate line below it,
+# are removed each boot. Hostname is set each boot.
+
+EOM
+
+        # Read the IPv4 address
+        ip4_addr=$(${jq} -r -M '.interfaces.public[0].ipv4.ip_address' ${meta})
+        ip4_mask=$(${jq} -r -M '.interfaces.public[0].ipv4.netmask' ${meta})
+        ip4_gateway=$(${jq} -r -M '.interfaces.public[0].ipv4.gateway' ${meta})
+        if [ "${ip4_addr}" != "null" ]; then
+            echo "DigitalOcean: adding public IPv4 configuration"
+            cat >> /etc/rc.conf <<EOM
+# DigitalOcean Dynamic Configuration
+defaultrouter="${ip4_gateway}"
+# DigitalOcean Dynamic Configuration
+ifconfig_vtnet0="inet ${ip4_addr} netmask ${ip4_mask}"
+EOM
+
+        fi
+
+        # Anchor address
+        ipA4_addr=$(${jq} -r -M '.interfaces.public[0].anchor_ipv4.ip_address' ${meta})
+        ipA4_mask=$(${jq} -r -M '.interfaces.public[0].anchor_ipv4.netmask' ${meta})
+        if [ "${ipA4_addr}" != "null" ]; then
+            echo "DigitalOcean: adding anchor ipv4 configuration"
+            cat >> /etc/rc.conf <<EOM
+# DigitalOcean Dynamic Configuration
+ifconfig_vtnet0_alias0="inet ${ipA4_addr} netmask ${ipA4_mask}"
+EOM
+        fi
+
+        # Read the private IPv4 address
+        ipP4_addr=$(${jq} -r -M '.interfaces.private[0].ipv4.ip_address' ${meta})
+        ipP4_mask=$(${jq} -r -M '.interfaces.private[0].ipv4.netmask' ${meta})
+        if [ "${ipP4_addr}" != "null" ]; then
+            echo "DigitalOcean: adding private IPv4 configration"
+            cat >> /etc/rc.conf <<EOM
+# DigitalOcean Dynamic Configuration
+ifconfig_vtnet1="inet ${ipP4_addr} netmask ${ipP4_mask}"
+EOM
+        fi
+
+        # Read the IPv6 address
+        ip6_addr=$(${jq} -r -M '.interfaces.public[0].ipv6.ip_address' ${meta})
+        ip6_mask=$(${jq} -r -M '.interfaces.public[0].ipv6.cidr' ${meta})
+        ip6_gateway=$(${jq} -r -M '.interfaces.public[0].ipv6.gateway' ${meta})
+        if [ "${ip6_addr}" != "null" ]; then
+            echo "DigitalOcean: adding IPv6 configuration"
+            cat >> /etc/rc.conf <<EOM
+# DigitalOcean Dynamic Configuration
+ifconfig_vtnet0_ipv6="inet6 ${ip6_addr} prefixlen ${ip6_mask}"
+# DigitalOcean Dynamic Configuration
+ipv6_defaultrouter="${ip6_gateway}"
+# DigitalOcean Dynamic Configuration
+ipv6_activate_all_interfaces="yes"
+EOM
+        fi
+
+        echo "DigitalOcean: finished droplet configuration"
+
+}
+
+load_rc_config $name
+run_rc_command "$1"
+
+unset _rc_conf_loaded
+load_rc_config network
+load_rc_config netif
+load_rc_config routing
+
+echo "DigitalOcean: re-starting networking"
+/etc/rc.d/netif forcestart
+/etc/rc.d/routing forcestart
