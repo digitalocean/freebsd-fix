@@ -24,8 +24,8 @@ cat > /etc/rc.conf <<EOM
 
 # Added by DigitalOcean repair script
 cloudinit_enable="YES"
-digitaloceanpre="YES"
-digitalocean="YES"
+digitaloceanpre_enable="YES"
+digitalocean_enable="YES"
 
 $(cat /tmp/rc.conf)
 EOM

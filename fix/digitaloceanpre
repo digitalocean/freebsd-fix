@@ -7,6 +7,7 @@
 . /etc/rc.subr
 
 name="digitaloceanpre"
+rcvar="digitaloceanpre_enable"
 start_cmd="${name}_start"
 stop_cmd=":"
 
